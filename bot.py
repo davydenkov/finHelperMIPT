@@ -1,13 +1,32 @@
-import telebot
-import requests
-import pandas as pd
-from bs4 import BeautifulSoup # Или другая библиотека для парсинга
-# ... другие импорты ...
-import apimoex #Библиотека для получения данных с MOEX
+import asyncio
+import logging
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters.command import Command
 
-# Замените 'YOUR_BOT_TOKEN' на ваш токен бота
-BOT_TOKEN = 'YOUR_BOT_TOKEN'
-bot = telebot.TeleBot(BOT_TOKEN)
+# Включаем логирование, чтобы не пропустить важные сообщения
+logging.basicConfig(level=logging.INFO)
+# Объект бота
+bot = Bot(token="12345678:AaBbCcDdEeFfGgHh")
+# Диспетчер
+dp = Dispatcher()
+
+# Хэндлер на команду /help
+@dp.message(Command("help"))
+async def cmd_start(message: types.Message):
+    await message.answer("Help docs")
+
+# Хэндлер на команду /start
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    await message.answer("Please sea menu")
+
+
+# Запуск процесса поллинга новых апдейтов
+async def main():
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
 
 # Ваш словарь акций (из вашего примера)
 dict_new = {
@@ -49,60 +68,4 @@ def analyze_market(method, ticker):
     else:
         return "Неверный метод анализа."
 
-# Обработчик команды /start
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "Добро пожаловать в Фин-помощника!")
-    # ... добавить кнопки меню ...
-
-
-# Обработчик кнопки "Валюта"
-@bot.message_handler(func=lambda message: message.text == "Валюта")
-def handle_currency(message):
-    # ... реализация выбора валюты и периода ...
-
-#Обработчик кнопки "Новости"
-@bot.message_handler(func=lambda message: message.text == "Новости")
-def handle_news(message):
-    bot.reply_to(message,"Введите ключевое слово:")
-    bot.register_next_step_handler(message, process_news_keyword)
-
-
-def process_news_keyword(message):
-    keyword = message.text
-    # ... получение и вывод новостей ...
-
-
-#Обработчик кнопки "Акции"
-@bot.message_handler(func=lambda message: message.text == "Акции")
-def handle_stock(message):
-    bot.reply_to(message,"Введите тикер акции:")
-    bot.register_next_step_handler(message,process_stock_ticker)
-
-
-def process_stock_ticker(message):
-    ticker = message.text
-    # ... обработка ввода тикера, выбор периода и вывод котировок ...
-
-
-# Обработчик кнопки "Анализ рынка"
-@bot.message_handler(func=lambda message: message.text == "Анализ рынка")
-def handle_market_analysis(message):
-    # ... реализация выбора метода анализа и вывода результатов ...
-
-
-# Обработчик команды /help
-@bot.message_handler(commands=['help'])
-def send_help(message):
-    # ... инструкция по использованию бота ...
-
-
-# Обработчик команды /pay
-@bot.message_handler(commands=['pay'])
-def send_payment_info(message):
-    # ... информация об оплате и подписке ...
-
-
-# Запуск бота
-bot.polling()
 
