@@ -6,7 +6,7 @@ from aiogram.filters.command import Command
 # Включаем логирование, чтобы не пропустить важные сообщения
 logging.basicConfig(level=logging.INFO)
 # Объект бота
-bot = Bot(token="12345678:AaBbCcDdEeFfGgHh")
+bot = Bot(token="7530890044:AAEnQ1HDt7_Z4UbnFHVnYdsFP9SGniyRsJE")
 # Диспетчер
 dp = Dispatcher()
 
@@ -20,13 +20,6 @@ async def cmd_start(message: types.Message):
 async def cmd_start(message: types.Message):
     await message.answer("Please sea menu")
 
-
-# Запуск процесса поллинга новых апдейтов
-async def main():
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
 
 # Ваш словарь акций (из вашего примера)
 dict_new = {
@@ -68,4 +61,10 @@ def analyze_market(method, ticker):
     else:
         return "Неверный метод анализа."
 
+# Запуск процесса поллинга новых апдейтов
+async def main():
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
 
