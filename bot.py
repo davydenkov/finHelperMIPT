@@ -33,6 +33,8 @@ import xml.etree.ElementTree as ET
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
 bot_token = os.getenv('BOT_TOKEN')
+yandex_folder = os.getenv('YANDEX_FOLDER')
+yandex_api_key = os.getenv('YANDEX_API_KEY')
 bot = Bot(token=bot_token)
 
 dp = Dispatcher()
@@ -152,7 +154,7 @@ async def process_period(message: types.Message, state: FSMContext):
     date_to = datetime.now().strftime('%Y-%m-%d')
     date_from = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
 
-    url = f"https://yandex.ru/search/xml?folderid=b1g0vfs986msn9pjmb4d&apikey=AQVN1YdOnecDm7AOI24D8gixs0BbZMfQMirJJ7NX&query=site%3Aforbes.ru%20%D0%BF%D0%BE%D0%BB%D1%8E%D1%81%D0%B7%D0%BE%D0%BB%D0%BE%D1%82%D0%BE&lr=11316&l10n=ru&sortby=rlv&filter=strict&groupby=attr%3D.mode%3Dflat.groups-on-page%3D10.docs-in-group%3D1&maxpassages=5&page=0"
+    url = f"https://yandex.ru/search/xml?folderid="+yandex_folder+"&apikey="+yandex_api_key+"&query=site%3Aforbes.ru%20%D0%BF%D0%BE%D0%BB%D1%8E%D1%81%D0%B7%D0%BE%D0%BB%D0%BE%D1%82%D0%BE&lr=11316&l10n=ru&sortby=rlv&filter=strict&groupby=attr%3D.mode%3Dflat.groups-on-page%3D10.docs-in-group%3D1&maxpassages=5&page=0"
     
     await state.finish()
 
