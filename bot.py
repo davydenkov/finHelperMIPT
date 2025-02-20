@@ -44,27 +44,31 @@ class InputData(StatesGroup):
     waiting_for_date_from = State()
     waiting_for_date_to = State()
 
+
+class NewsRequest(StatesGroup):
+    waiting_for_query = State()
+    waiting_for_period = State()
+
 def parse_xml_to_array(xml_string):
     try:
         root = ET.fromstring(xml_string) # Парсим XML-строку
         data = []
 
-        # Проверяем, есть ли элементы 'item' в XML
         if root.findall('.//item'): # Yandex Search API
             for item in root.findall('.//item'):
                 item_data = {}
                 for child in item:
                     item_data[child.tag] = child.text
                 data.append(item_data)
-        elif root.findall('.//channel/item'): # RSS, Atom and others
+        elif root.findall('.//channel/item'): 
             for item in root.findall('.//channel/item'):
                 item_data = {}
                 for child in item:
                     item_data[child.tag] = child.text
                 data.append(item_data)    
-        else: # Если 'item' не найден, обрабатываем все элементы
+        else: 
             for element in root.iter():
-                if element.text and element.text.strip(): # Проверяем на пустые элементы
+                if element.text and element.text.strip(): 
                     data.append({element.tag: element.text.strip()})
 
         return data
@@ -75,13 +79,13 @@ def parse_xml_to_array(xml_string):
 
 
 
-@dp.message(Command("help"))
-async def cmd_start(message: types.Message):
-    await message.reply("Введите текст:")
+@dp.message(Command("news"))
+async def cmd_news(message: types.Message):
+    await message.reply("Введите ключевое слово поиска:")
     await InputData.waiting_for_text.set()
 
 
-@dp.message(state=InputData.waiting_for_text)
+@dp.message(InputData.waiting_for_text)
 async def process_text(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['text'] = message.text
@@ -90,8 +94,8 @@ async def process_text(message: types.Message, state: FSMContext):
     await InputData.waiting_for_date_from.set()
 
 
-@dp.callback_query_handler(simple_cal_callback.filter(), state=InputData.waiting_for_date_from)
-async def process_date_from(callback_query: types.CallbackQuery, callback_data: dict, state: FSMContext):
+@dp.callback_query(SimpleCalendarCallback.filter(), InputData.waiting_for_date_from)
+async def process_date_from(callback_query: CallbackQuery, callback_data: CallbackData, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
         async with state.proxy() as data:
@@ -102,8 +106,8 @@ async def process_date_from(callback_query: types.CallbackQuery, callback_data: 
         await InputData.waiting_for_date_to.set()
 
 
-@dp.callback_query_handler(simple_cal_callback.filter(), state=InputData.waiting_for_date_to)
-async def process_date_to(callback_query: types.CallbackQuery, callback_data: dict, state: FSMContext):
+@dp.callback_query(SimpleCalendarCallback.filter(), InputData.waiting_for_date_to)
+async def process_date_to(callback_query: CallbackQuery, callback_data: CallbackData, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
         async with state.proxy() as data:
@@ -118,7 +122,7 @@ async def process_date_to(callback_query: types.CallbackQuery, callback_data: di
                                             f"Дата 'До': {data['date_to']}")
         await state.finish()
 
-@dp.message_handler(state=NewsRequest.waiting_for_query)
+@dp.message(NewsRequest.waiting_for_query)
 async def process_query(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['query'] = message.text
@@ -131,13 +135,8 @@ async def process_query(message: types.Message, state: FSMContext):
     await state.set_state(NewsRequest.waiting_for_period.state) 
 
 
-class NewsRequest(StatesGroup): 
-    waiting_for_query = State()
-    waiting_for_period = State() 
 
-
-
-@dp.message_handler(state=NewsRequest.waiting_for_period)
+@dp.message(NewsRequest.waiting_for_period)
 async def process_period(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         query = data['query']
@@ -203,7 +202,7 @@ async def fetch_full_text(url):
 
 
 
-@dp.message_handler(state=NewsRequest.waiting_for_period)
+@dp.message(NewsRequest.waiting_for_period)
 async def process_period(message: types.Message, state: FSMContext):
 
     async with aiohttp.ClientSession() as session:
@@ -219,7 +218,7 @@ async def process_period(message: types.Message, state: FSMContext):
 
 
 @dp.message(Command("help"))
-async def cmd_start(message: types.Message):
+async def cmd_help(message: types.Message):
     await message.answer("Help docs")
 
 @dp.message(Command("start"))
@@ -239,56 +238,6 @@ def get_news(keyword, period):
     # Возвращает список словарей: [{'title': заголовок, 'short_summary': краткое описание, 'link': ссылка, 'full_text': полный текст}]
     pass
 
-def get_stock_quotes(ticker, period):
-    async with state.proxy() as data:
-        data['days'] = int(message.text)
-
-    try:
-        conn = psycopg2.connect(DATABASE_URL)
-        cursor = conn.cursor()
-
-        ticker = data['ticker']
-        days = data['days']
-
-        query = f"""
-            SELECT timestamp, close_price
-            FROM quotes
-            WHERE figi = '{ticker}' 
-            AND timestamp >= CURRENT_DATE - INTERVAL '{days} days'
-            ORDER BY timestamp;
-        """
-
-        cursor.execute(query)
-        rows = cursor.fetchall()
-
-        if not rows:
-            await message.reply(f"Нет данных для тикера {ticker} за последние {days} дней.")
-            await state.finish()
-            return
-
-        df = pd.DataFrame(rows, columns=['timestamp', 'close_price'])
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        plt.plot(df['timestamp'], df['close_price'])
-        plt.xlabel('Дата')
-        plt.ylabel('Цена закрытия')
-        plt.title(f'Котировки {ticker} за {days} дней')
-        plt.grid(True)
-
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png')
-        buf.seek(0)
-        await message.reply_photo(buf)
-        plt.close() 
-
-    except Exception as e:
-        await message.reply(f"Произошла ошибка: {e}")
-        logging.error(f"Error: {e}")
-
-    finally:
-        if conn:
-            cursor.close()
-            conn.close()
-        await state.finish()
 
 def final_table():
     pass
