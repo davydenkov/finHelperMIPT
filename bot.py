@@ -1,11 +1,18 @@
 import asyncio
 import logging
 import os
+import requests
+import json
+import aiohttp
+import urllib.parse
+import re
+
+from bs4 import BeautifulSoup
 
 #from aiogram import Bot, Dispatcher, types
 #from aiogram.utils import executor
 
-from aiogram.filters.command import Command
+from aiogram.filters import Command, StateFilter
 from dotenv import load_dotenv
 #from aiogram.contrib.fsm_storage.memory import MemoryStorage
 #from aiogram import FSMContext
@@ -29,15 +36,17 @@ from aiogram.utils.markdown import hbold
 from aiogram.client.default import DefaultBotProperties
 
 import xml.etree.ElementTree as ET
+import html
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 load_dotenv()
 bot_token = os.getenv('BOT_TOKEN')
 yandex_folder = os.getenv('YANDEX_FOLDER')
 yandex_api_key = os.getenv('YANDEX_API_KEY')
 bot = Bot(token=bot_token)
-
 dp = Dispatcher()
+TAG_RE = re.compile(r'<[^>]+>')
 
 class InputData(StatesGroup):
     waiting_for_text = State()
@@ -49,78 +58,90 @@ class NewsRequest(StatesGroup):
     waiting_for_query = State()
     waiting_for_period = State()
 
-def parse_xml_to_array(xml_string):
-    try:
-        root = ET.fromstring(xml_string) # Парсим XML-строку
-        data = []
+async def fetch_news(url):
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url) as response:
+                response.raise_for_status() # Проверка на ошибки HTTP
+                xml_string = await response.text()
 
-        if root.findall('.//item'): # Yandex Search API
-            for item in root.findall('.//item'):
-                item_data = {}
-                for child in item:
-                    item_data[child.tag] = child.text
-                data.append(item_data)
-        elif root.findall('.//channel/item'): 
-            for item in root.findall('.//channel/item'):
-                item_data = {}
-                for child in item:
-                    item_data[child.tag] = child.text
-                data.append(item_data)    
-        else: 
-            for element in root.iter():
-                if element.text and element.text.strip(): 
-                    data.append({element.tag: element.text.strip()})
+            root = ET.fromstring(xml_string)
+            data = []
+             
+            if root.findall('.//doc'): # Yandex Search API, некоторые RSS
+                for doc in root.findall('.//doc'):
+                    item_data = {}
+                    item_data['title'] =  BeautifulSoup(html.unescape(ET.tostring(doc.find('.//title'), method='xml').decode()), "html.parser").get_text()
+                    item_data['url'] = doc.find('.//url').text
+                    item_data['snippet'] = doc.find('.//extended-text').text
+                    item_data['yandex_cache_url'] = doc.find('.//saved-copy-url').text
 
-        return data
+                    data.append(item_data)
 
-    except ET.ParseError as e:
-        print(f"Ошибка парсинга XML: {e}")
-        return None
+            # Преобразование в JSON
+            #json_data = json.dumps(data, indent=2, ensure_ascii=False)
+            
+            return data
 
+        except (aiohttp.ClientError, ET.ParseError) as e:
+            print(f"Ошибка: {e}")
+            return None
 
 
-@dp.message(Command("news"))
-async def cmd_news(message: types.Message):
+@dp.message(StateFilter(None), Command("news"))
+async def cmd_news(message: types.Message, state: FSMContext):
     await message.reply("Введите ключевое слово поиска:")
-    await InputData.waiting_for_text.set()
+    await state.set_state(InputData.waiting_for_text)
 
 
 @dp.message(InputData.waiting_for_text)
 async def process_text(message: types.Message, state: FSMContext):
-    async with state.proxy() as data:
-        data['text'] = message.text
-
+    await state.update_data(text=message.text.lower())
     await message.reply("Выберите дату 'От':", reply_markup=await SimpleCalendar().start_calendar())
-    await InputData.waiting_for_date_from.set()
+    await state.set_state(InputData.waiting_for_date_from)
 
 
 @dp.callback_query(SimpleCalendarCallback.filter(), InputData.waiting_for_date_from)
 async def process_date_from(callback_query: CallbackQuery, callback_data: CallbackData, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
-        async with state.proxy() as data:
-            data['date_from'] = date.strftime("%Y-%m-%d")
-
-        await callback_query.message.answer(f"Выбрана дата 'От': {data['date_from']}")
+        await state.update_data(date_from=date.strftime("%Y%m%d"))
+        await callback_query.message.answer(f"Выбрана дата 'От': " + date.strftime("%Y%m%d"))
         await callback_query.message.answer("Выберите дату 'До':", reply_markup=await SimpleCalendar().start_calendar())
-        await InputData.waiting_for_date_to.set()
+        await state.set_state(InputData.waiting_for_date_to)
 
 
 @dp.callback_query(SimpleCalendarCallback.filter(), InputData.waiting_for_date_to)
 async def process_date_to(callback_query: CallbackQuery, callback_data: CallbackData, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
-        async with state.proxy() as data:
-            data['date_to'] = date.strftime("%Y-%m-%d")
-            text = data['text']
-            date_from = data['date_from']
-
+        data = await state.get_data()
+        data['date_to'] = date.strftime("%Y%m%d")
+        text = data['text']
+        date_from = data['date_from']
+        date_to = data['date_to']
 
         await callback_query.message.answer(f"Выбрана дата 'До': {data['date_to']}\n\n"
                                             f"Введенный текст: {text}\n"
                                             f"Дата 'От': {date_from}\n"
-                                            f"Дата 'До': {data['date_to']}")
-        await state.finish()
+                                            f"Дата 'До': {date_to}")
+        sites = ['forbes.ru','frankmedia.ru','finance.mail.ru','t-j.ru','finmarket.ru']
+        for site in sites:
+         date_period = date_from + '..' + date_to
+         parameters = {'folderid' : yandex_folder,'apikey' : yandex_api_key, 'query' : 'date: ' + date_period + ' site:'+site+' '+ text, 'lr':'11316','l10n':'ru','sortby':'rlv','filter':'strict','maxpassages':5,'page':0}
+
+         url = f"https://yandex.ru/search/xml?" + urllib.parse.urlencode(parameters) + "&groupby=attr%3D.mode%3Dflat.groups-on-page%3D10.docs-in-group%3D1" 
+         await callback_query.message.answer(url)
+         news_data = await fetch_news(url)
+
+        #if news_data and news_data['items']:
+        #   summarizer = pipeline("summarization")
+        #   await process_news(message, news_data, summarizer)
+        #else:
+        #    await callback_query.message.answer("Новостей по вашему запросу не найдено.")
+
+         await process_news (callback_query.message, news_data)
+        await state.clear()
 
 @dp.message(NewsRequest.waiting_for_query)
 async def process_query(message: types.Message, state: FSMContext):
@@ -136,51 +157,24 @@ async def process_query(message: types.Message, state: FSMContext):
 
 
 
-@dp.message(NewsRequest.waiting_for_period)
-async def process_period(message: types.Message, state: FSMContext):
-    async with state.proxy() as data:
-        query = data['query']
-        period = message.text
 
-    days = 0
-    if period == "За сегодня":
-        days = 1
-    elif period == "За 7 дней":
-        days = 7
-    elif period == "За месяц":
-        days = 30
-
-    date_to = datetime.now().strftime('%Y-%m-%d')
-    date_from = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
-
-    url = f"https://yandex.ru/search/xml?folderid="+yandex_folder+"&apikey="+yandex_api_key+"&query=site%3Aforbes.ru%20%D0%BF%D0%BE%D0%BB%D1%8E%D1%81%D0%B7%D0%BE%D0%BB%D0%BE%D1%82%D0%BE&lr=11316&l10n=ru&sortby=rlv&filter=strict&groupby=attr%3D.mode%3Dflat.groups-on-page%3D10.docs-in-group%3D1&maxpassages=5&page=0"
-    
-    await state.finish()
-
-
-
-async def fetch_news(session, url):
-    async with session.get(url) as response:
-        return await response.json()
-
-
-
-async def process_news(message, news_data, summarizer): 
-    for i, item in enumerate(news_data['items'][:MAX_NEWS]):
+async def process_news(message, news_data): 
+    for i, item in enumerate(news_data):
         title = item['title']
         snippet = item['snippet']
-        url = item['link']
-        full_text = await fetch_full_text(url)
+        url = item['url']
+        #full_text = await fetch_full_text(url)
 
         # Суммаризация
-        try:
-            summary = summarizer(full_text, max_length=150, min_length=50, do_sample=False)[0]['summary_text']
-        except Exception as e:
-            print(f"Ошибка суммаризации: {e}")
-            summary = "Суммаризация недоступна."
+        #try:
+        #    summary = summarizer(full_text, max_length=150, min_length=50, do_sample=False)[0]['summary_text']
+        #except Exception as e:
+        #    print(f"Ошибка суммаризации: {e}")
+        #    summary = "Суммаризация недоступна."
 
-        await message.answer(f"*{title}*\n\n{summary}\n\n[Читать далее]({url})\n\n```\n{full_text}\n```",
-                             parse_mode="MarkdownV2")
+        await message.answer(f"<b>{title}</b>\n\n<a href='{url}'>Читать далее</a>\n\n{snippet}\n\n", parse_mode="HTML")
+ 
+        
 
 
 
