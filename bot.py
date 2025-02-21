@@ -131,7 +131,7 @@ async def process_date_to(callback_query: CallbackQuery, callback_data: Callback
          parameters = {'folderid' : yandex_folder,'apikey' : yandex_api_key, 'query' : 'date: ' + date_period + ' site:'+site+' '+ text, 'lr':'11316','l10n':'ru','sortby':'rlv','filter':'strict','maxpassages':5,'page':0}
 
          url = f"https://yandex.ru/search/xml?" + urllib.parse.urlencode(parameters) + "&groupby=attr%3D.mode%3Dflat.groups-on-page%3D10.docs-in-group%3D1" 
-         await callback_query.message.answer(url)
+         #await callback_query.message.answer(url)
          news_data = await fetch_news(url)
 
         #if news_data and news_data['items']:
