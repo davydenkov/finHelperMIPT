@@ -11,12 +11,13 @@ from urllib.parse import urlparse
 from datetime import datetime, timedelta
 #from config_reader import config
 from urllib.parse import urlparse
+import asyncio
 
 logging.basicConfig(level=logging.INFO)
 
 FIGI_FILE = 'figi.txt'
 
-def load_figies():
+async def load_figies():
     try:
         with open(FIGI_FILE, 'r', encoding='utf-8') as f:
             lines = f.readlines()
@@ -29,7 +30,7 @@ def load_figies():
         print(f"Ошибка при чтении файла: {e}")
         return None
 
-def get_historical_candles(client, figi, days_back = 365): 
+async def get_historical_candles(client, figi, days_back = 365): 
     now = datetime.utcnow()
     from_ = now - timedelta(days=days_back)
 
@@ -45,8 +46,17 @@ def get_historical_candles(client, figi, days_back = 365):
         print(f'Error getting historical candles for {figi}: {e}')
         return []
 
+async def get_instruments(client, figi):
+    try:
+        await asyncio.sleep(1)
+        r = client.instruments.find_instrument(query=figi)
+        return r.instruments
+    except Exception as e:
+        print(f'Error getting instruments for {figi}: {e}')
+        return []
 
-def save_candles_to_db(candles, figi):
+
+async def save_candles_instruments_to_db(candles, instruments, figi):
     try:
         database_dsn = os.getenv('DATABASE_URL')
         connection = psycopg2.connect(database_dsn)
@@ -71,29 +81,56 @@ def save_candles_to_db(candles, figi):
                 candle.volume,
                 candle.time,
             ))
-        connection.commit()
+            connection.commit()
         print(f"Saved {len(candles)} candles to DB.")
+
+        for instrument in instruments:
+            insert_query = """
+                INSERT INTO figi (figi, name, instrument_type, ticker, class_code, isin)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (figi, ticker) DO UPDATE SET
+                name = EXCLUDED.name,
+                instrument_type = EXCLUDED.instrument_type,
+                isin = EXCLUDED.isin,
+                class_code = EXCLUDED.class_code;
+            """
+            cursor.execute(insert_query, (
+                figi,
+                instrument.name,
+                instrument.instrument_type,
+                instrument.ticker,
+                instrument.class_code,
+                instrument.isin
+
+            ))
+        connection.commit()
+        print(f"Saved {len(instruments)} to DB.")
+
+
     except Exception as e:
-        print(f'Error saving candles to DB: {e}')
+        print(f'Error saving to DB: {e}')
     finally:
         if connection:
             cursor.close()
             connection.close()
 
 
-def main():
+async def main():
     load_dotenv()
     api_token = os.getenv('TINKOFF_API_TOKEN')
 
     with Client(api_token) as client:
-        figies = load_figies()
+        figies = await load_figies()
         for figi in figies:
             print(figi)
-            candles = get_historical_candles(client, figi)
-            print(candles)
-            save_candles_to_db(candles, figi)
+            #candles = await get_historical_candles(client, figi)
+            candles = {}
+            instruments = await get_instruments(client, figi)
+            print(instruments)
+            await save_candles_instruments_to_db(candles, instruments, figi)
+
 
 
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())

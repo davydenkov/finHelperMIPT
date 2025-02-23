@@ -35,6 +35,9 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, Callback
 from aiogram.utils.markdown import hbold
 from aiogram.client.default import DefaultBotProperties
 
+import asyncpg
+from aiogram.types import InlineQuery, InlineQueryResultArticle, InputTextMessageContent
+
 import xml.etree.ElementTree as ET
 import html
 
@@ -47,16 +50,31 @@ yandex_api_key = os.getenv('YANDEX_API_KEY')
 bot = Bot(token=bot_token)
 dp = Dispatcher()
 TAG_RE = re.compile(r'<[^>]+>')
-
-class InputData(StatesGroup):
-    waiting_for_text = State()
-    waiting_for_date_from = State()
-    waiting_for_date_to = State()
+database_dsn = os.getenv('DATABASE_URL')
 
 
-class NewsRequest(StatesGroup):
-    waiting_for_query = State()
-    waiting_for_period = State()
+async def get_suggestions(query, instrument_type='share'):
+    conn = await asyncpg.connect(database_dsn)
+    try:
+        rows = await conn.fetch(
+            "SELECT ticker FROM figi WHERE instrument_type = '{$instrument_type}' ticker LIKE $1 LIMIT 10", f"{query}%"
+        ) # LIMIT 10 для ограничения количества подсказок
+        suggestions = [row["ticker"] for row in rows]
+        return suggestions
+    finally:
+        await conn.close()
+
+async def get_data_stock(ticker, date_from=0, date_to = 'current_date', instrument_type='share'):
+    conn = await asyncpg.connect(database_dsn)
+    try:
+        rows = await conn.fetch(
+            "SELECT  close_price, timestamp FROM quotes left join figi on figi.figi = quotes.figi WHERE instrument_type = '{$instrument_type}' and figi.ticker = ticker and timestamp > {date_from} && timestmp<{date_to}", f"{query}%"
+        ) # LIMIT 10 для ограничения количества подсказок
+        #suggestions = [row["tinker"] for row in rows]
+        return rows
+    finally:
+        await conn.close()
+
 
 async def fetch_news(url):
     async with aiohttp.ClientSession() as session:
@@ -87,6 +105,10 @@ async def fetch_news(url):
             print(f"Ошибка: {e}")
             return None
 
+class InputData(StatesGroup):
+    waiting_for_text = State()
+    waiting_for_date_from = State()
+    waiting_for_date_to = State()
 
 @dp.message(StateFilter(None), Command("news"))
 async def cmd_news(message: types.Message, state: FSMContext):
@@ -143,19 +165,6 @@ async def process_date_to(callback_query: CallbackQuery, callback_data: Callback
          await process_news (callback_query.message, news_data)
         await state.clear()
 
-@dp.message(NewsRequest.waiting_for_query)
-async def process_query(message: types.Message, state: FSMContext):
-    async with state.proxy() as data:
-        data['query'] = message.text
-
-    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.add(types.KeyboardButton("За сегодня"))
-    keyboard.add(types.KeyboardButton("За 7 дней"))
-    keyboard.add(types.KeyboardButton("За месяц"))
-    await message.reply("Выберите период:", reply_markup=keyboard)
-    await state.set_state(NewsRequest.waiting_for_period.state) 
-
-
 
 
 async def process_news(message, news_data): 
@@ -192,23 +201,60 @@ async def fetch_full_text(url):
             print(f"Error fetching URL {url}: {e}")
             return f"Ошибка загрузки полного текста: {e}"
 
+class InputDataStock(StatesGroup):
+    waiting_for_text = State()
+    waiting_for_date_from = State()
+    waiting_for_date_to = State()
+
+@dp.message(StateFilter(None), Command("stock"))
+async def cmd_news(message: types.Message, state: FSMContext):
+    await message.reply("Введите тинкер акции:")
+    await state.set_state(InputDataStock.waiting_for_text)
 
 
+@dp.message(InputDataStock.waiting_for_text)
+async def process_text_stock(message: types.Message, state: FSMContext):
+    await state.update_data(text=message.text.lower())
+    await message.reply("Выберите дату 'От':", reply_markup=await SimpleCalendar().start_calendar())
+    await state.set_state(InputDataStock.waiting_for_date_from)
 
 
-@dp.message(NewsRequest.waiting_for_period)
-async def process_period(message: types.Message, state: FSMContext):
+@dp.callback_query(SimpleCalendarCallback.filter(), InputData.waiting_for_date_from)
+async def process_date_from_stock(callback_query: CallbackQuery, callback_data: CallbackData, state: FSMContext):
+    selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
+    if selected:
+        await state.update_data(date_from=date.strftime("%Y%m%d"))
+        await callback_query.message.answer(f"Выбрана дата 'От': " + date.strftime("%Y%m%d"))
+        await callback_query.message.answer("Выберите дату 'До':", reply_markup=await SimpleCalendar().start_calendar())
+        await state.set_state(InputDataStock.waiting_for_date_to)
 
-    async with aiohttp.ClientSession() as session:
-        news_data = await fetch_news(session, url)
 
-        if news_data and news_data['items']:
-           summarizer = pipeline("summarization") 
-           await process_news(message, news_data, summarizer)
-        else:
-            await message.reply("Новостей по вашему запросу не найдено.")
+@dp.callback_query(SimpleCalendarCallback.filter(), InputDataStock.waiting_for_date_to)
+async def process_date_to_stock(callback_query: CallbackQuery, callback_data: CallbackData, state: FSMContext):
+    selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
+    if selected:
+        data = await state.get_data()
+        data['date_to'] = date.strftime("%Y%m%d")
+        text = data['text']
+        date_from = data['date_from']
+        date_to = data['date_to']
 
-    await state.finish()
+        await callback_query.message.answer(f"Выбрана дата 'До': {data['date_to']}\n\n"
+                                            f"Введенный текст: {text}\n"
+                                            f"Дата 'От': {date_from}\n"
+                                            f"Дата 'До': {date_to}")
+        for site in sites:
+         #await callback_query.message.answer(url)
+         stock_data = await get_data_stock(tiker, date_from, date_to, 'share')
+
+        #if news_data and news_data['items']:
+        #   summarizer = pipeline("summarization")
+        #   await process_news(message, news_data, summarizer)
+        #else:
+        #    await callback_query.message.answer("Новостей по вашему запросу не найдено.")
+
+         await process_plot (callback_query.message, stock_data, 'share')
+        await state.clear()
 
 
 @dp.message(Command("help"))
