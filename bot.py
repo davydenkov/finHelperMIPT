@@ -31,15 +31,24 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart
 from aiogram.filters.callback_data import CallbackData
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery, FSInputFile
 from aiogram.utils.markdown import hbold
 from aiogram.client.default import DefaultBotProperties
+from aiogram.utils.keyboard import ReplyKeyboardBuilder,  InlineKeyboardBuilder
 
+
+import pandas as pd
 import asyncpg
 from aiogram.types import InlineQuery, InlineQueryResultArticle, InputTextMessageContent
 
 import xml.etree.ElementTree as ET
 import html
+
+import mplfinance as mpf
+import yfinance as yf
+import uuid
+
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -56,9 +65,10 @@ database_dsn = os.getenv('DATABASE_URL')
 async def get_suggestions(query, instrument_type='share'):
     conn = await asyncpg.connect(database_dsn)
     try:
-        rows = await conn.fetch(
-            "SELECT ticker FROM figi WHERE instrument_type = '{$instrument_type}' ticker LIKE $1 LIMIT 10", f"{query}%"
-        ) # LIMIT 10 для ограничения количества подсказок
+        
+        sql = f"SELECT ticker FROM figi WHERE instrument_type = '{instrument_type}' and ticker LIKE '{query.upper()}%' LIMIT 10"
+        logger.info(sql)
+        rows = await conn.fetch(sql) 
         suggestions = [row["ticker"] for row in rows]
         return suggestions
     finally:
@@ -67,10 +77,10 @@ async def get_suggestions(query, instrument_type='share'):
 async def get_data_stock(ticker, date_from=0, date_to = 'current_date', instrument_type='share'):
     conn = await asyncpg.connect(database_dsn)
     try:
-        rows = await conn.fetch(
-            "SELECT  close_price, timestamp FROM quotes left join figi on figi.figi = quotes.figi WHERE instrument_type = '{$instrument_type}' and figi.ticker = ticker and timestamp > {date_from} && timestmp<{date_to}", f"{query}%"
-        ) # LIMIT 10 для ограничения количества подсказок
-        #suggestions = [row["tinker"] for row in rows]
+        sql = f"SELECT  figi.ticker as ticker, open_price as Open, close_price as Close, low_price as Low, high_price as High, timestamp as Date, volume as Volume FROM quotes left join figi on figi.figi = quotes.figi WHERE instrument_type = '{instrument_type}' and figi.ticker = '{ticker}' and timestamp between '{date_from}' and '{date_to}'"
+        logger.info(sql);
+        rows = await conn.fetch(sql) 
+        #suggestions = [row["ticker"] for row in rows]
         return rows
     finally:
         await conn.close()
@@ -167,6 +177,7 @@ async def process_date_to(callback_query: CallbackQuery, callback_data: Callback
 
 
 
+
 async def process_news(message, news_data): 
     for i, item in enumerate(news_data):
         title = item['title']
@@ -203,28 +214,47 @@ async def fetch_full_text(url):
 
 class InputDataStock(StatesGroup):
     waiting_for_text = State()
+    waiting_for_ticker = State()
     waiting_for_date_from = State()
     waiting_for_date_to = State()
 
 @dp.message(StateFilter(None), Command("stock"))
-async def cmd_news(message: types.Message, state: FSMContext):
-    await message.reply("Введите тинкер акции:")
+async def cmd_stock(message: types.Message, state: FSMContext):
+    await message.reply("Введите первые буквы тикера:")
     await state.set_state(InputDataStock.waiting_for_text)
 
-
 @dp.message(InputDataStock.waiting_for_text)
+async def process_suggestions(message: types.Message, state: FSMContext):
+    await message.reply("Введите тикер акции:")
+    words = await get_suggestions(message.text, 'share')
+
+    if words:
+        builder = ReplyKeyboardBuilder()
+        for word in words:
+            builder.add(types.KeyboardButton(text=word, callback_data=word))
+        builder.adjust(1)
+        await message.answer("Выберите тикер:",reply_markup=builder.as_markup(resize_keyboard=True))
+        await state.set_state(InputDataStock.waiting_for_ticker)
+    else:
+        await message.reply("Тикеров, начинающихся с этого текста, не найдено.")
+        await state.clear()
+    #await state.set_state(InputDataStock.waiting_for_ticker)
+
+
+@dp.message(InputDataStock.waiting_for_ticker)
 async def process_text_stock(message: types.Message, state: FSMContext):
-    await state.update_data(text=message.text.lower())
-    await message.reply("Выберите дату 'От':", reply_markup=await SimpleCalendar().start_calendar())
+    await message.answer('Выберите дату ', reply_markup=types.ReplyKeyboardRemove())
+    await state.update_data(text=message.text.upper())
+    await message.answer("От:", reply_markup=await SimpleCalendar().start_calendar())
     await state.set_state(InputDataStock.waiting_for_date_from)
 
 
-@dp.callback_query(SimpleCalendarCallback.filter(), InputData.waiting_for_date_from)
+@dp.callback_query(SimpleCalendarCallback.filter(), InputDataStock.waiting_for_date_from)
 async def process_date_from_stock(callback_query: CallbackQuery, callback_data: CallbackData, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
-        await state.update_data(date_from=date.strftime("%Y%m%d"))
-        await callback_query.message.answer(f"Выбрана дата 'От': " + date.strftime("%Y%m%d"))
+        await state.update_data(date_from=date.strftime("%Y-%m-%d"))
+        await callback_query.message.answer(f"Выбрана дата 'От': " + date.strftime("%Y-%m-%d"))
         await callback_query.message.answer("Выберите дату 'До':", reply_markup=await SimpleCalendar().start_calendar())
         await state.set_state(InputDataStock.waiting_for_date_to)
 
@@ -234,18 +264,17 @@ async def process_date_to_stock(callback_query: CallbackQuery, callback_data: Ca
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
         data = await state.get_data()
-        data['date_to'] = date.strftime("%Y%m%d")
-        text = data['text']
+        data['date_to'] = date.strftime("%Y-%m-%d")
+        ticker = data['text']
         date_from = data['date_from']
         date_to = data['date_to']
 
         await callback_query.message.answer(f"Выбрана дата 'До': {data['date_to']}\n\n"
-                                            f"Введенный текст: {text}\n"
+                                            f"Введенный ticker: {ticker}\n"
                                             f"Дата 'От': {date_from}\n"
                                             f"Дата 'До': {date_to}")
-        for site in sites:
          #await callback_query.message.answer(url)
-         stock_data = await get_data_stock(tiker, date_from, date_to, 'share')
+        stock_data = await get_data_stock(ticker, date_from, date_to, 'share')
 
         #if news_data and news_data['items']:
         #   summarizer = pipeline("summarization")
@@ -253,29 +282,173 @@ async def process_date_to_stock(callback_query: CallbackQuery, callback_data: Ca
         #else:
         #    await callback_query.message.answer("Новостей по вашему запросу не найдено.")
 
-         await process_plot (callback_query.message, stock_data, 'share')
+        await process_plot (callback_query.message, stock_data, 'share')
+        await state.clear()
+
+class InputDataCurrency(StatesGroup):
+    waiting_for_text = State()
+    waiting_for_ticker = State()
+    waiting_for_date_from = State()
+    waiting_for_date_to = State()
+
+@dp.message(StateFilter(None), Command("currency"))
+async def cmd_currency(message: types.Message, state: FSMContext):
+    await message.reply("Введите первые буквы тикера валюты:")
+    await state.set_state(InputDataCurrency.waiting_for_text)
+
+@dp.message(InputDataCurrency.waiting_for_text)
+async def process_suggestions_currency(message: types.Message, state: FSMContext):
+    await message.reply("Выберите тикер валюты:")
+    words = await get_suggestions(message.text, 'currency')
+
+    if words:
+        builder = ReplyKeyboardBuilder()
+        for word in words:
+            builder.add(types.KeyboardButton(text=word, callback_data=word))
+        builder.adjust(1)
+        await message.answer("Выберите тикер:",reply_markup=builder.as_markup(resize_keyboard=True))
+        await state.set_state(InputDataCurrency.waiting_for_ticker)
+    else:
+        await message.reply("Тикеров, начинающихся с этого текста, не найдено.")
+        await state.clear()
+    #await state.set_state(InputDataStock.waiting_for_ticker)
+
+
+@dp.message(InputDataCurrency.waiting_for_ticker)
+async def process_text_currency(message: types.Message, state: FSMContext):
+    await message.answer('Выберите дату ', reply_markup=types.ReplyKeyboardRemove())
+    await state.update_data(text=message.text.upper())
+    await message.answer("От:", reply_markup=await SimpleCalendar().start_calendar())
+    await state.set_state(InputDataCurrency.waiting_for_date_from)
+
+@dp.callback_query(SimpleCalendarCallback.filter(), InputDataCurrency.waiting_for_date_from)
+async def process_date_from_currency(callback_query: CallbackQuery, callback_data: CallbackData, state: FSMContext):
+    selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
+    if selected:
+        await state.update_data(date_from=date.strftime("%Y-%m-%d"))
+        await callback_query.message.answer(f"Выбрана дата 'От': " + date.strftime("%Y-%m-%d"))
+        await callback_query.message.answer("Выберите дату 'До':", reply_markup=await SimpleCalendar().start_calendar())
+        await state.set_state(InputDataCurrency.waiting_for_date_to)
+
+
+@dp.callback_query(SimpleCalendarCallback.filter(), InputDataCurrency.waiting_for_date_to)
+async def process_date_to_currency(callback_query: CallbackQuery, callback_data: CallbackData, state: FSMContext):
+    selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
+    if selected:
+        data = await state.get_data()
+        data['date_to'] = date.strftime("%Y-%m-%d")
+        ticker = data['text']
+        date_from = data['date_from']
+        date_to = data['date_to']
+
+        await callback_query.message.answer(f"Выбрана дата 'До': {data['date_to']}\n\n"
+                                            f"Введенный ticker: {ticker}\n"
+                                            f"Дата 'От': {date_from}\n"
+                                            f"Дата 'До': {date_to}")
+         #await callback_query.message.answer(url)
+        currency_data = await get_data_stock(ticker, date_from, date_to, 'currency')
+
+        #if news_data and news_data['items']:
+        #   summarizer = pipeline("summarization")
+        #   await process_news(message, news_data, summarizer)
+        #else:
+        #    await callback_query.message.answer("Новостей по вашему запросу не найдено.")
+
+        await process_plot (callback_query.message, currency_data, 'share')
         await state.clear()
 
 
+async def process_plot (message, data, instrument_type = 'share'):
+    #for i, item in enumerate(stock_data):
+    #    await message.answer(item['ticker'] + " " + item['timestamp'].strftime('%Y-%m-%d') + " " + str(item['close_price']) + "\n\n")
+    try:
+        # Загрузка данных с Yahoo Finance
+        #data = yf.download(tickers='PONY', period='1mo', interval="1d", multi_level_index=False)
+        # Создание DataFrame из данных PostgreSQL
+        data = pd.DataFrame(data, columns=["ticker","Open","Close","Low","High","Date", "Volume"])
+        data = data.set_index('Date')
+        
+        data.applymap(str)
+        logger.info(data)
+        
+        filename = '/tmp/' + uuid.uuid4().hex + '.png'    
+        mpf.plot(data, type="candle", volume=True, style="yahoo", savefig=filename)
+        await message.answer_photo(FSInputFile(filename))
+    except Exception as e:
+        await message.reply(f"Ошибка: {e}")
+
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
-    await message.answer("Help docs")
+    help_message = """
+
+Курс валюты 
+кнопка «валюта»
+Выбор валюты 
+Выбор периода  
+Выдача курса  
+
+Новости по ключевым словам
+кнопка «новости»
+Впишите необходимое слово 
+Бот ищет новости с данным словом по ТОП СМИ 
+Выдача новостей(сокращенных с помощью нейросети) с ссылками на первоисточник и полный текст 
+
+Котировки акций
+кнопка акции 
+Введите тикер акции (бот подсказывает по введенным буквам) 
+Выбор периода 
+Выдача данных 
+
+Анализ рынка акции 
+Кнопка анализ рынка 
+Выбор способа (модель AI или анализ аномальных торгов)
+При выборе «анализ аномалий» выводятся все пары акции согласна формуле (формулу скину)
+При выборе AI, AI ищет точки роста с процентом вероятности (модель можно использовать на основе нескольких показателей рынок, «настроение» новостей, объемы торгов»
+Выдают список акции с рекомендацией к покупкам 
+
+Инструкция 
+раздел с инструкцией по пользованию бота
+
+Раздел оплата 
+Пробный период - 7 дней 
+Подписка на 1 год 
+Подписка на 6 месяцев 
+Подписка на 1 месяц
+    """
+    await message.answer(help_message)
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    await message.answer("Please sea menu")
+    await message.answer("Please click menu")
+
+
+@dp.message(Command("subscription"))
+async def cmd_start(message: types.Message):
+    words = ["Подписка на 1 месяц", "Подписка на 6 месяцев", "Подписка на 1 год"  ]
+    builder = ReplyKeyboardBuilder()
+    for word in words:
+            builder.add(types.KeyboardButton(text=word, callback_data=word)) 
+    builder.adjust(1)
+    await message.answer("Выберите подписку:",reply_markup=builder.as_markup(resize_keyboard=True))
+    await message.answer("Выберите подписку")
+
+@dp.message(Command("analyze"))
+async def cmd_start(message: types.Message):
+    words = ["LSTM", "GRU", "RNN", "Anomaly" ]
+    builder = ReplyKeyboardBuilder()
+    for word in words:
+            builder.add(types.KeyboardButton(text=word, callback_data=word)) 
+    builder.adjust(1)
+    await message.answer("Выберите модель анализа:",reply_markup=builder.as_markup(resize_keyboard=True))
+    await message.answer("Выберите модель")
+
 
 
 dict_new = {
     "Сталь": ['CHMF', 'MAGN', 'NLMK'],
-    # ... остальные данные ...
 }
 
 def get_currency_rate(currency, period):
-    pass
-
-def get_news(keyword, period):
-    # Возвращает список словарей: [{'title': заголовок, 'short_summary': краткое описание, 'link': ссылка, 'full_text': полный текст}]
     pass
 
 
