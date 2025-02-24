@@ -36,6 +36,15 @@ from aiogram.utils.markdown import hbold
 from aiogram.client.default import DefaultBotProperties
 from aiogram.utils.keyboard import ReplyKeyboardBuilder,  InlineKeyboardBuilder
 
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import GRU, Dense, Dropout, Conv1D, MaxPooling1D, Flatten
+from sklearn.preprocessing import MinMaxScaler
+import xgboost as xgb
+import catboost as cb
+import lightgbm as lgb
+
 
 import pandas as pd
 import asyncpg
@@ -434,7 +443,7 @@ async def cmd_start(message: types.Message):
 
 @dp.message(Command("analyze"))
 async def cmd_start(message: types.Message):
-    words = ["LSTM", "GRU", "RNN", "Anomaly" ]
+    words = ["LSTM", "GRU", "RNN", "XGBoost","CatBoost","LightGBM","Anomaly" ]
     builder = ReplyKeyboardBuilder()
     for word in words:
             builder.add(types.KeyboardButton(text=word, callback_data=word)) 
@@ -455,14 +464,91 @@ def get_currency_rate(currency, period):
 def final_table():
     pass
 
+def create_dataset(dataset, look_back=60):
+    dataX, dataY = [], []
+    for i in range(len(dataset) - look_back - 1):
+        a = dataset[i:(i + look_back), 0]
+        dataX.append(a)
+        dataY.append(dataset[i + look_back, 0])
+    return np.array(dataX), np.array(dataY)
 
 def analyze_market(method, ticker):
-    if method == "AI":
-     pass
-    elif method == "аномалии":
-        return final_table() # Вызов вашей функции
-    else:
-        return "Неверный метод анализа."
+     
+    data = yf.download(ticker, start="2020-01-01", end="2024-01-01")
+
+    data['SMA_5'] = data['Close'].rolling(window=5).mean()  
+    data['SMA_10'] = data['Close'].rolling(window=10).mean()
+    data['SMA_20'] = data['Close'].rolling(window=20).mean()
+    data['Volatility'] = data['Close'].rolling(window=10).std()
+    data.dropna(inplace=True) 
+
+    X = data.drop('Close', axis=1)
+    y = data['Close']
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_data = scaler.fit_transform(data['Close'].values.reshape(-1, 1))
+
+    train_data_len = int(np.ceil(len(data) * .8))
+    train_data = scaled_data[0:train_data_len, :]
+    test_data = scaled_data[train_data_len - 60:, :]
+    look_back = 60
+    trainX, trainY = create_dataset(train_data, look_back)
+    testX, testY = create_dataset(test_data, look_back)
+
+    # Reshape для GRU и CNN
+    trainX_gru = np.reshape(trainX, (trainX.shape[0], trainX.shape[1], 1))
+    testX_gru = np.reshape(testX, (testX.shape[0], testX.shape[1], 1))
+
+    trainX_cnn = np.reshape(trainX, (trainX.shape[0], trainX.shape[1], 1))
+    testX_cnn = np.reshape(testX, (testX.shape[0], testX.shape[1], 1))
+
+    models = {
+        "XGBoost": xgb.XGBRegressor(objective='reg:squarederror', random_state=42),
+        "CatBoost": cb.CatBoostRegressor(loss_function='RMSE', verbose=0, random_state=42),
+        "LightGBM": lgb.LGBMRegressor(objective='regression', random_state=42),
+        "GRU": Sequential([
+            GRU(50, return_sequences=True, input_shape=(trainX_gru.shape[1], 1)),
+            Dropout(0.2),
+            GRU(50),
+            Dropout(0.2),
+            Dense(1)
+            ]),
+        "CNN": Sequential([
+            Conv1D(filters=64, kernel_size=3, activation='relu', input_shape=(trainX_cnn.shape[1], 1)),
+            MaxPooling1D(pool_size=2),
+            Flatten(),
+            Dense(50, activation='relu'),
+            Dense(1)
+         ])
+      }
+
+    results = {}
+    # XGBoost
+    models["XGBoost"].fit(trainX, trainY)
+    y_pred_xgb = models["XGBoost"].predict(testX)
+    rmse_xgb = np.sqrt(mean_squared_error(testY, y_pred_xgb))
+    results["XGBoost"] = rmse_xgb
+
+    # GRU
+    models["GRU"].compile(optimizer='adam', loss='mse')
+    models["GRU"].fit(trainX_gru, trainY, epochs=25, batch_size=32, verbose=1)
+    y_pred_gru = models["GRU"].predict(testX_gru)
+    rmse_gru = np.sqrt(mean_squared_error(testY, y_pred_gru))
+    results["GRU"] = rmse_gru
+
+    # CNN
+    models["CNN"].compile(optimizer='adam', loss='mse')
+    models["CNN"].fit(trainX_cnn, trainY, epochs=25, batch_size=32, verbose=1)
+    y_pred_cnn = models["CNN"].predict(testX_cnn)
+    rmse_cnn = np.sqrt(mean_squared_error(testY, y_pred_cnn))
+    results["CNN"] = rmse_cnn
+    for name, model in models.items():
+            model.fit(X_train, y_train)
+            y_pred = model.predict(X_test)
+            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            results[name] = rmse 
+    
 
 async def main():
     await dp.start_polling(bot)
