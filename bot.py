@@ -166,7 +166,7 @@ async def process_date_to(callback_query: CallbackQuery, callback_data: Callback
                                             f"Введенный текст: {text}\n"
                                             f"Дата 'От': {date_from}\n"
                                             f"Дата 'До': {date_to}")
-        sites = ['forbes.ru','frankmedia.ru','finance.mail.ru','t-j.ru','finmarket.ru']
+        sites = ['forbes.ru','frankmedia.ru','finance.mail.ru','rbc.ru','finmarket.ru','finam.ru']
         for site in sites:
          date_period = date_from + '..' + date_to
          parameters = {'folderid' : yandex_folder,'apikey' : yandex_api_key, 'query' : 'date: ' + date_period + ' site:'+site+' '+ text, 'lr':'11316','l10n':'ru','sortby':'rlv','filter':'strict','maxpassages':5,'page':0}
