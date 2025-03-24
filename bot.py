@@ -506,7 +506,7 @@ def analyze_market(method, ticker):
     models = {
         "XGBoost": xgb.XGBRegressor(objective='reg:squarederror', random_state=42),
         "CatBoost": cb.CatBoostRegressor(loss_function='RMSE', verbose=0, random_state=42),
-        "LightGBM": lgb.LGBMRegressor(objective='regression', random_state=42),
+        "LSTM": lgb.LGBMRegressor(objective='regression', random_state=42),
         "GRU": Sequential([
             GRU(50, return_sequences=True, input_shape=(trainX_gru.shape[1], 1)),
             Dropout(0.2),
