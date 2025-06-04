@@ -448,9 +448,12 @@ async def cmd_start(message: types.Message):
     for word in words:
             builder.add(types.KeyboardButton(text=word, callback_data=word)) 
     builder.adjust(1)
-    await message.answer("Выберите модель анализа:",reply_markup=builder.as_markup(resize_keyboard=True))
-    await message.answer("Выберите модель")
-
+    #await message.answer("Выберите модель анализа:",reply_markup=builder.as_markup(resize_keyboard=True))
+    #await message.answer("Выберите модель")
+    await message.answer("Рекомендуемые инструменты к покупке")
+    tickers = ["SBER", "VTB", "GPG","ALFA","PSBR"]
+    for ticker in tickers:
+        await message.answer(ticker)
 
 
 dict_new = {

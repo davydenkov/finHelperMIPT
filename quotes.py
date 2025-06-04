@@ -30,7 +30,7 @@ async def load_figies():
         print(f"Ошибка при чтении файла: {e}")
         return None
 
-async def get_historical_candles(client, figi, days_back = 150):
+async def get_historical_candles(client, figi, days_back = 105):
     now = datetime.utcnow()
     from_ = now - timedelta(days=days_back)
 
@@ -62,6 +62,7 @@ async def save_candles_instruments_to_db(candles, instruments, figi):
         connection = psycopg2.connect(database_dsn)
         cursor = connection.cursor()
         for candle in candles:
+            
             insert_query = """
                 INSERT INTO quotes (figi, open_price, close_price, high_price, low_price, volume, timestamp)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -72,6 +73,7 @@ async def save_candles_instruments_to_db(candles, instruments, figi):
                 low_price = EXCLUDED.low_price,
                 volume = EXCLUDED.volume;
             """
+            print(insert_query)
             cursor.execute(insert_query, (
                 figi,
                 candle.open.units + candle.open.nano / 1e9,
@@ -94,6 +96,7 @@ async def save_candles_instruments_to_db(candles, instruments, figi):
                 isin = EXCLUDED.isin,
                 class_code = EXCLUDED.class_code;
             """
+            print(insert_query)
             cursor.execute(insert_query, (
                 figi,
                 instrument.name,
@@ -124,7 +127,7 @@ async def main():
         for figi in figies:
             print(figi)
             candles = await get_historical_candles(client, figi)
-            candles = {}
+            #candles = {}
             instruments = await get_instruments(client, figi)
             print(instruments)
             await save_candles_instruments_to_db(candles, instruments, figi)
