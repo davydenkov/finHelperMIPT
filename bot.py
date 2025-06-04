@@ -556,7 +556,7 @@ async def analyze_market(stock_data, ticker):
     if (prediction[0] > data[target].iloc[-1]):
         return "Можно покупать " + ticker + " цена акции увеличится"
     else:
-        return "Можно придержать " + ticker + " цена акции не увеличится"
+        return "Можно подождать " + ticker + " цена акции не увеличится"
 
 
 
