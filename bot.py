@@ -168,7 +168,7 @@ async def process_date_to(callback_query: CallbackQuery, callback_data: Callback
                                             f"Введенный текст: {text}\n"
                                             f"Дата 'От': {date_from}\n"
                                             f"Дата 'До': {date_to}")
-        sites = ['forbes.ru','frankmedia.ru','finance.mail.ru','rbc.ru','finmarket.ru','finam.ru']
+        sites = ['forbes.ru','frankmedia.ru','finance.mail.ru','finmarket.ru','finam.ru']
         for site in sites:
          date_period = date_from + '..' + date_to
          parameters = {'folderid' : yandex_folder,'apikey' : yandex_api_key, 'query' : 'date: ' + date_period + ' site:'+site+' '+ text, 'lr':'11316','l10n':'ru','sortby':'rlv','filter':'strict','maxpassages':5,'page':0}
@@ -203,25 +203,27 @@ async def process_news(message, news_data):
         #    print(f"Ошибка суммаризации: {e}")
         #    summary = "Суммаризация недоступна."
 
-        model_name = "IlyaGusev/rut5_base_sum_gazeta"
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = T5ForConditionalGeneration.from_pretrained(model_name)
+        #model_name = "IlyaGusev/rut5_base_sum_gazeta"
+        #tokenizer = AutoTokenizer.from_pretrained(model_name)
+        #model = T5ForConditionalGeneration.from_pretrained(model_name)
 
-        input_ids = tokenizer(
-            [snippet],
-            max_length=600,
-            add_special_tokens=True,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt"
-        )["input_ids"]
+        #input_ids = tokenizer(
+        #    [snippet],
+        #    max_length=600,
+        #    add_special_tokens=True,
+        #    padding="max_length",
+        #    truncation=True,
+        #    return_tensors="pt"
+        #)["input_ids"]
 
-        output_ids = model.generate(
-            input_ids=input_ids,
-            no_repeat_ngram_size=4
-        )[0]
+        #output_ids = model.generate(
+        #    input_ids=input_ids,
+        #    no_repeat_ngram_size=4
+        #)[0]
 
-        summary = tokenizer.decode(output_ids, skip_special_tokens=True)
+        #summary = tokenizer.decode(output_ids, skip_special_tokens=True)
+
+        summary = " "
 
         await message.answer(f"<b>{title}</b>\n\n<a href='{url}'>Читать далее</a>\n\n{summary}\n\n{snippet}\n\n", parse_mode="HTML")
  
