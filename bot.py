@@ -476,6 +476,7 @@ async def process_suggestions(message: types.Message, state: FSMContext):
 
 @dp.message(InputDataStockAnalyze.waiting_for_ticker)
 async def process_text_stock(message: types.Message, state: FSMContext):
+    await state.update_data(text=message.text.upper())
     data = await state.get_data()
     ticker = data['text']
     #words = ["LSTM", "GRU", "RNN", "XGBoost","CatBoost","LightGBM","Anomaly" ]
