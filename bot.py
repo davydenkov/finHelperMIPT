@@ -451,9 +451,16 @@ async def cmd_start(message: types.Message):
     #await message.answer("Выберите модель анализа:",reply_markup=builder.as_markup(resize_keyboard=True))
     #await message.answer("Выберите модель")
     await message.answer("Рекомендуемые инструменты к покупке")
-    tickers = ["SBER", "VTB", "GPG","ALFA","PSBR"]
-    for ticker in tickers:
-        await message.answer(ticker)
+    tickers = ["SBER", "VTBR", "GPG","ALFA","PSBR"]
+    ticker = "SBER"
+    today = datetime.now()
+    one_year_ago = today - relativedelta(years=1)
+    stock_data = await get_data_stock(ticker, one_year_ago.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"), 'share')
+    await message.answer(await analyze_market(stock_data, ticker)
+
+
+    #for ticker in tickers:
+    #   await message.answer(ticker)
 
 
 dict_new = {
@@ -475,7 +482,47 @@ def create_dataset(dataset, look_back=60):
         dataY.append(dataset[i + look_back, 0])
     return np.array(dataX), np.array(dataY)
 
-def analyze_market(method, ticker):
+async def analyze_market(stock_data, ticker):
+    data = pd.DataFrame(stock_data, columns=["Open","Close","Low","High","Date", "Volume"])
+    # Data preparation: Adding 'Date' column and resetting the index
+    data['Date'] = data.index
+    data.reset_index(drop=True, inplace=True)
+
+    # Feature engineering: Adding more features (Year, Month, Day)
+    data['Year'] = data['Date'].datetime.year
+    data['Month'] = data['Date'].datetime.month
+    data['Day'] = data['Date'].datetime.day
+
+    # Selecting features and target
+    features = ['Open', 'High', 'Low', 'Volume', 'Year', 'Month', 'Day']
+    target = 'Close'
+    # Splitting the data into features (X) and target (y)
+    X = data[features]
+    y = data[target]
+
+    # Splitting the data into training and testing sets
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Creating the CatBoostRegressor model
+    model = CatBoostRegressor(iterations=1000, learning_rate=0.1, depth=6, verbose=0)
+
+    # Training the model
+    model.fit(X_train, y_train)
+    predict_df = data[features].tail(1)
+    today = datetime.now()
+    tomorrow = today + timedelta(1)
+    input_data = np.array([[predict_df['Open'], predict_df['High'], predict_df['Low'], predict_df['Volume'], tomorrow.datetime.year, tomorrow.datetime.month, tomorrow.datetime.day]])
+
+    if (model.predict(input_data) > data[target].tail(1))
+        return "Можно покупать " + ticker + "цена акции увеличится"
+    else
+        return "Можно придержать " + ticker + " цена акции не увеличится"
+
+
+
+
+
+def analyze_market_tech(method, ticker):
      
     data = yf.download(ticker, start="2020-01-01", end="2024-01-01")
 
