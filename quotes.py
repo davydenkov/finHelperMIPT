@@ -30,7 +30,7 @@ async def load_figies():
         print(f"Ошибка при чтении файла: {e}")
         return None
 
-async def get_historical_candles(client, figi, days_back = 365): 
+async def get_historical_candles(client, figi, days_back = 150):
     now = datetime.utcnow()
     from_ = now - timedelta(days=days_back)
 
@@ -123,7 +123,7 @@ async def main():
         figies = await load_figies()
         for figi in figies:
             print(figi)
-            #candles = await get_historical_candles(client, figi)
+            candles = await get_historical_candles(client, figi)
             candles = {}
             instruments = await get_instruments(client, figi)
             print(instruments)
