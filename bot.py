@@ -442,26 +442,57 @@ async def cmd_start(message: types.Message):
     await message.answer("Выберите подписку:",reply_markup=builder.as_markup(resize_keyboard=True))
     await message.answer("Выберите подписку")
 
-@dp.message(Command("analyze"))
-async def cmd_start(message: types.Message):
-    words = ["LSTM", "GRU", "RNN", "XGBoost","CatBoost","LightGBM","Anomaly" ]
-    builder = ReplyKeyboardBuilder()
-    for word in words:
-            builder.add(types.KeyboardButton(text=word, callback_data=word)) 
-    builder.adjust(1)
+
+
+
+
+#Stock Analyze
+class InputDataStockAnalyze(StatesGroup):
+    waiting_for_text = State()
+    waiting_for_ticker = State()
+
+@dp.message(StateFilter(None), Command("analyze"))
+async def cmd_stock(message: types.Message, state: FSMContext):
+    await message.reply("Введите первые буквы тикера:")
+    await state.set_state(InputDataStockAnalyze.waiting_for_text)
+
+@dp.message(InputDataStockAnalyze.waiting_for_text)
+async def process_suggestions(message: types.Message, state: FSMContext):
+    await message.reply("Введите тикер акции:")
+    words = await get_suggestions(message.text, 'share')
+
+    if words:
+        builder = ReplyKeyboardBuilder()
+        for word in words:
+            builder.add(types.KeyboardButton(text=word, callback_data=word))
+        builder.adjust(1)
+        await message.answer("Выберите тикер:",reply_markup=builder.as_markup(resize_keyboard=True))
+        await state.set_state(InputDataStockAnalyze.waiting_for_ticker)
+    else:
+        await message.reply("Тикеров, начинающихся с этого текста, не найдено.")
+        await state.clear()
+    #await state.set_state(InputDataStockAnalyze.waiting_for_ticker)
+
+
+@dp.message(InputDataStockAnalyze.waiting_for_ticker)
+async def process_text_stock(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    ticker = data['text']
+    #words = ["LSTM", "GRU", "RNN", "XGBoost","CatBoost","LightGBM","Anomaly" ]
+    #builder = ReplyKeyboardBuilder()
+    #for word in words:
+    #        builder.add(types.KeyboardButton(text=word, callback_data=word))
+    #builder.adjust(1)
     #await message.answer("Выберите модель анализа:",reply_markup=builder.as_markup(resize_keyboard=True))
     #await message.answer("Выберите модель")
-    await message.answer("Рекомендуемые инструменты к покупке")
-    tickers = ["SBER", "VTBR"]
-    ticker = "VTBR"
+    #await message.answer("Рекомендуемые инструменты к покупке")
+    #tickers = ["SBER", "VTBR"]
     today = datetime.now()
     one_year_ago = today - timedelta(days=365)
     stock_data = await get_data_stock(ticker, one_year_ago.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"), 'share')
     await message.answer(await analyze_market(stock_data, ticker))
+    await state.clear()
 
-
-    #for ticker in tickers:
-    #   await message.answer(ticker)
 
 
 dict_new = {
