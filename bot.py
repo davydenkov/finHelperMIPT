@@ -235,7 +235,7 @@ async def cmd_stock(message: types.Message, state: FSMContext):
 
 @dp.message(InputDataStock.waiting_for_text)
 async def process_suggestions(message: types.Message, state: FSMContext):
-    await message.reply("Введите тикер акции:")
+    #await message.reply("Введите тикер акции:")
     words = await get_suggestions(message.text, 'share')
 
     if words:
@@ -243,7 +243,7 @@ async def process_suggestions(message: types.Message, state: FSMContext):
         for word in words:
             builder.add(types.KeyboardButton(text=word, callback_data=word))
         builder.adjust(1)
-        await message.answer("Выберите тикер:",reply_markup=builder.as_markup(resize_keyboard=True))
+        await message.answer("Выберите тикер акции:",reply_markup=builder.as_markup(resize_keyboard=True))
         await state.set_state(InputDataStock.waiting_for_ticker)
     else:
         await message.reply("Тикеров, начинающихся с этого текста, не найдено.")
@@ -308,7 +308,7 @@ async def cmd_currency(message: types.Message, state: FSMContext):
 
 @dp.message(InputDataCurrency.waiting_for_text)
 async def process_suggestions_currency(message: types.Message, state: FSMContext):
-    await message.reply("Выберите тикер валюты:")
+    #await message.reply("Выберите тикер валюты:")
     words = await get_suggestions(message.text, 'currency')
 
     if words:
@@ -316,7 +316,7 @@ async def process_suggestions_currency(message: types.Message, state: FSMContext
         for word in words:
             builder.add(types.KeyboardButton(text=word, callback_data=word))
         builder.adjust(1)
-        await message.answer("Выберите тикер:",reply_markup=builder.as_markup(resize_keyboard=True))
+        await message.answer("Выберите тикер валюты:",reply_markup=builder.as_markup(resize_keyboard=True))
         await state.set_state(InputDataCurrency.waiting_for_ticker)
     else:
         await message.reply("Тикеров, начинающихся с этого текста, не найдено.")
@@ -458,7 +458,7 @@ async def cmd_stock(message: types.Message, state: FSMContext):
 
 @dp.message(InputDataStockAnalyze.waiting_for_text)
 async def process_suggestions(message: types.Message, state: FSMContext):
-    await message.reply("Введите тикер акции:")
+    #await message.reply("Введите тикер акции:")
     words = await get_suggestions(message.text, 'share')
 
     if words:
