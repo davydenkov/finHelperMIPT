@@ -58,6 +58,7 @@ import yfinance as yf
 import uuid
 import numpy as np
 
+from transformers import AutoTokenizer, T5ForConditionalGeneration
 
 
 logging.basicConfig(level=logging.INFO)
@@ -202,7 +203,27 @@ async def process_news(message, news_data):
         #    print(f"Ошибка суммаризации: {e}")
         #    summary = "Суммаризация недоступна."
 
-        await message.answer(f"<b>{title}</b>\n\n<a href='{url}'>Читать далее</a>\n\n{snippet}\n\n", parse_mode="HTML")
+        model_name = "IlyaGusev/rut5_base_sum_gazeta"
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = T5ForConditionalGeneration.from_pretrained(model_name)
+
+        input_ids = tokenizer(
+            [snippet],
+            max_length=600,
+            add_special_tokens=True,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt"
+        )["input_ids"]
+
+        output_ids = model.generate(
+            input_ids=input_ids,
+            no_repeat_ngram_size=4
+        )[0]
+
+        summary = tokenizer.decode(output_ids, skip_special_tokens=True)
+
+        await message.answer(f"<b>{title}</b>\n\n<a href='{url}'>Читать далее</a>\n\n{summary}\n\n{snippet}\n\n", parse_mode="HTML")
  
         
 
