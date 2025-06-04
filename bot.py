@@ -23,7 +23,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 #from aiogram.dispatcher.filters.state import State, StatesGroup
 #from aiogram_calendar import simple_cal_callback, SimpleCalendar
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback, DialogCalendar, DialogCalendarCallback, \
     get_user_locale
@@ -41,10 +41,10 @@ from sklearn.metrics import mean_squared_error
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import GRU, Dense, Dropout, Conv1D, MaxPooling1D, Flatten
 from sklearn.preprocessing import MinMaxScaler
-import xgboost as xgb
-import catboost as cb
-import lightgbm as lgb
-
+import xgboost
+import catboost
+import lightgbm
+from catboost import CatBoostRegressor
 
 import pandas as pd
 import asyncpg
@@ -56,6 +56,7 @@ import html
 import mplfinance as mpf
 import yfinance as yf
 import uuid
+import numpy as np
 
 
 
@@ -451,12 +452,12 @@ async def cmd_start(message: types.Message):
     #await message.answer("Выберите модель анализа:",reply_markup=builder.as_markup(resize_keyboard=True))
     #await message.answer("Выберите модель")
     await message.answer("Рекомендуемые инструменты к покупке")
-    tickers = ["SBER", "VTBR", "GPG","ALFA","PSBR"]
-    ticker = "SBER"
+    tickers = ["SBER", "VTBR"]
+    ticker = "VTBR"
     today = datetime.now()
-    one_year_ago = today - relativedelta(years=1)
+    one_year_ago = today - timedelta(days=365)
     stock_data = await get_data_stock(ticker, one_year_ago.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"), 'share')
-    await message.answer(await analyze_market(stock_data, ticker)
+    await message.answer(await analyze_market(stock_data, ticker))
 
 
     #for ticker in tickers:
@@ -483,15 +484,15 @@ def create_dataset(dataset, look_back=60):
     return np.array(dataX), np.array(dataY)
 
 async def analyze_market(stock_data, ticker):
-    data = pd.DataFrame(stock_data, columns=["Open","Close","Low","High","Date", "Volume"])
+    data = pd.DataFrame(stock_data, columns=["ticker", "Open","Close","Low","High","Date", "Volume"])
     # Data preparation: Adding 'Date' column and resetting the index
     data['Date'] = data.index
     data.reset_index(drop=True, inplace=True)
 
     # Feature engineering: Adding more features (Year, Month, Day)
-    data['Year'] = data['Date'].datetime.year
-    data['Month'] = data['Date'].datetime.month
-    data['Day'] = data['Date'].datetime.day
+    data['Year'] = pd.to_datetime(data['Date']).dt.year
+    data['Month'] = pd.to_datetime(data['Date']).dt.month
+    data['Day'] = pd.to_datetime(data['Date']).dt.day
 
     # Selecting features and target
     features = ['Open', 'High', 'Low', 'Volume', 'Year', 'Month', 'Day']
@@ -511,11 +512,18 @@ async def analyze_market(stock_data, ticker):
     predict_df = data[features].tail(1)
     today = datetime.now()
     tomorrow = today + timedelta(1)
-    input_data = np.array([[predict_df['Open'], predict_df['High'], predict_df['Low'], predict_df['Volume'], tomorrow.datetime.year, tomorrow.datetime.month, tomorrow.datetime.day]])
-
-    if (model.predict(input_data) > data[target].tail(1))
-        return "Можно покупать " + ticker + "цена акции увеличится"
-    else
+    predict_df["Year"] = tomorrow.year
+    predict_df["Month"] = tomorrow.month
+    predict_df["Day"] = tomorrow.day
+    prediction = model.predict(predict_df)
+    print(predict_df)
+    print(tomorrow.year)
+    print(data[target].iloc[-1])
+    print(prediction[0])
+    print(stock_data[-1])
+    if (prediction[0] > data[target].iloc[-1]):
+        return "Можно покупать " + ticker + " цена акции увеличится"
+    else:
         return "Можно придержать " + ticker + " цена акции не увеличится"
 
 
